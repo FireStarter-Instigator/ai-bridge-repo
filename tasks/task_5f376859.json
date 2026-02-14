@@ -1,6 +1,0 @@
-{
-  "id": "5f376859",
-  "ai": "gemini_1",
-  "prompt": "\nMICROBOT ISSUE DETECTED\n\nType: CRASH\nDescription: Microbot process terminated unexpectedly\n\nUptime before crash: 30 seconds\n\nPlease analyze this issue and provide:\n1. Likely cause\n2. How to fix it\n3. Any code changes needed\n\nIf code changes are needed, provide complete Java file(s).\n",
-  "timestamp": "2026-02-14T00:31:28.091835"
-}
