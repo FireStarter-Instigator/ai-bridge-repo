@@ -1,5 +1,7 @@
 {
   "task_id": "gemini_test_002",
-  "response": "ORACLE RECEIVED: What is 2+2? Answer with just the number.",
-  "status": "success"
+  "ai_used": "gemini_1",
+  "response": "What is 2+2? Answer with just the number.",
+  "status": "success",
+  "timestamp": "2026-02-14 08:02:00"
 }
