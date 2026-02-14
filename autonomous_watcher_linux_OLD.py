@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-MICROBOT AUTONOMOUS WATCHER - Linux/Oracle VM Version WITH GUI
+MICROBOT AUTONOMOUS WATCHER - Linux/Oracle VM Version
 
 Monitors microbot.jar execution, detects failures, communicates with AI Bridge
 
 Requirements:
-- Oracle VM with microbot repo at ~/ai-bridge-repo/
+- Oracle VM with microbot repo at ~/microbot/
 - AI Bridge repo at ~/ai-bridge-repo/
 - Tor Browser running (SOCKS5 on 127.0.0.1:9150)
 - Screenshots saved by microbot plugin to ~/microbot-screenshots/
-- DISPLAY set for GUI
 
 Architecture:
-1. Runner: Launches microbot.jar with Tor proxy AND GUI
+1. Runner: Launches microbot.jar with Tor proxy
 2. Watcher: Monitors for crashes, connection loss, stuck states
 3. Architect: Sends issues to AI Bridge (Jules/Claude/Gemini)
 4. Builder: Pulls fixes, rebuilds, restarts
@@ -59,7 +58,7 @@ LOG_DIR.mkdir(exist_ok=True)
 # =============================================================================
 
 class MicrobotRunner:
-    """Manages microbot.jar process with GUI"""
+    """Manages microbot.jar process"""
     
     def __init__(self):
         self.process = None
@@ -67,7 +66,7 @@ class MicrobotRunner:
         self.restart_count = 0
     
     def start(self):
-        """Launch microbot.jar with Tor proxy AND GUI"""
+        """Launch microbot.jar with Tor proxy"""
         
         # Check Tor is running
         if not self._check_tor():
@@ -85,28 +84,18 @@ class MicrobotRunner:
         ]
         
         print(f"\n{'='*60}")
-        print(f"🚀 LAUNCHING MICROBOT WITH GUI")
+        print(f"🚀 LAUNCHING MICROBOT")
         print(f"{'='*60}")
         print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Command: {' '.join(cmd)}")
         print(f"Proxy: {TOR_PROXY_HOST}:{TOR_PROXY_PORT}")
-        print(f"Display: $DISPLAY")
         print(f"{'='*60}\n")
         
         try:
-            # Set environment for GUI
-            env = os.environ.copy()
-            
-            # Ensure DISPLAY is set
-            if 'DISPLAY' not in env:
-                env['DISPLAY'] = ':0'
-                print(f"Setting DISPLAY=:0")
-            
-            # Launch process WITH GUI
+            # Launch process
             self.process = subprocess.Popen(
                 cmd,
                 cwd=MICROBOT_DIR,
-                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -114,7 +103,6 @@ class MicrobotRunner:
             
             self.start_time = time.time()
             print(f"✓ Microbot started (PID: {self.process.pid})")
-            print(f"✓ GUI should be visible now!")
             
             return True
             
@@ -184,7 +172,7 @@ class IssueDetector:
                 'uptime': runner.get_uptime()
             }
         
-        # Check for stuck state via screenshots
+        # Check for connection loss (look for recent screenshots)
         issue = self._check_screenshots()
         if issue:
             return issue
@@ -199,7 +187,7 @@ class IssueDetector:
         screenshots = sorted(SCREENSHOT_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime)
         
         if not screenshots:
-            # No screenshots yet
+            # No screenshots yet, probably just started
             return None
         
         latest = screenshots[-1]
@@ -216,6 +204,11 @@ class IssueDetector:
         else:
             self.last_screenshot = latest
             self.last_screenshot_time = time.time()
+        
+        # Could add more checks here:
+        # - OCR for "Connection Lost" message
+        # - Compare screenshots for movement
+        # - Check log file for errors
         
         return None
 
@@ -260,20 +253,29 @@ Description: {issue['description']}
         
         if 'screenshot' in issue:
             prompt += f"\nScreenshot: {issue['screenshot']}"
+            prompt += "\n(Screenshot available in microbot-screenshots/ directory)"
         
         if 'uptime' in issue:
             prompt += f"\nUptime before crash: {issue['uptime']} seconds"
         
         prompt += """
 
-Please analyze and provide fix instructions.
+Please analyze this issue and provide:
+1. Likely cause
+2. How to fix it
+3. Any code changes needed
+
+If code changes are needed, provide complete Java file(s).
 """
         
-        # Route to appropriate AI
+        # Send to AI (route to appropriate AI)
+        # For vision tasks (stuck detection), use Claude
+        # For code fixes, use Gemini or Jules
+        
         if issue['type'] == 'STUCK' and 'screenshot' in issue:
             ai = 'claude'  # Needs vision
         else:
-            ai = 'gemini_1'
+            ai = 'gemini_1'  # Code fixes
         
         response = self.oracle.ask_ai(ai, prompt, timeout=120)
         
@@ -310,8 +312,8 @@ class MicrobotBuilder:
             if result.returncode == 0:
                 print("✓ Git pull successful")
                 if 'Already up to date' in result.stdout:
-                    return False
-                return True
+                    return False  # No changes
+                return True  # Changes pulled
             else:
                 print(f"⚠️ Git pull failed: {result.stderr}")
                 return False
@@ -330,7 +332,7 @@ class MicrobotBuilder:
                 cwd=self.microbot_dir,
                 capture_output=True,
                 text=True,
-                timeout=600
+                timeout=600  # 10 minute timeout
             )
             
             if result.returncode == 0:
@@ -338,7 +340,7 @@ class MicrobotBuilder:
                 return True
             else:
                 print(f"✗ Build failed!")
-                print(result.stderr[-500:])
+                print(result.stderr[-500:])  # Last 500 chars of error
                 return False
                 
         except Exception as e:
@@ -403,43 +405,47 @@ class AutonomousWatcher:
                     # Stop current process
                     self.runner.stop()
                     
-                    # Check if simple crash or complex issue
+                    # Check if we should auto-restart or get AI help
                     if issue['type'] == 'CRASH' and self.restart_count < MAX_RESTART_ATTEMPTS:
-                        # Simple crash - auto restart
+                        # Simple crash, try restart
                         print(f"\n♻️ Auto-restart ({self.restart_count + 1}/{MAX_RESTART_ATTEMPTS})")
                         self.restart_count += 1
                         time.sleep(RESTART_DELAY)
                         self.runner.start()
                         continue
                     
-                    # Complex issue - get AI help
+                    # Complex issue or too many crashes - get AI help
                     print("\n🤖 Requesting AI assistance...")
                     
                     fix = self.ai_bridge.request_fix(issue)
                     
                     if fix:
+                        # AI provided fix
+                        # For now, assume code was committed to GitHub
                         # Pull and rebuild
+                        
                         if self.builder.pull_latest():
-                            print("📥 New code pulled")
+                            print("📥 New code pulled from GitHub")
                             
                             if self.builder.rebuild():
-                                print("✅ Restarting with fix...")
-                                self.restart_count = 0
+                                print("✅ Build successful - restarting with fix...")
+                                self.restart_count = 0  # Reset counter
                                 time.sleep(RESTART_DELAY)
                                 self.runner.start()
                             else:
-                                print("❌ Build failed")
+                                print("❌ Build failed - waiting for manual intervention")
                                 break
                         else:
-                            print("⚠️ No new code - restarting anyway...")
+                            print("⚠️ No new code to pull - AI might not have committed yet")
+                            print("Restarting anyway...")
                             time.sleep(RESTART_DELAY)
                             self.runner.start()
                     else:
-                        print("❌ No fix from AI")
+                        print("❌ No fix received from AI")
                         break
                 
                 else:
-                    # All good
+                    # All good, show status
                     uptime = self.runner.get_uptime()
                     print(f"✓ Running OK (Uptime: {uptime}s, PID: {self.runner.process.pid})", end='\r')
                 
